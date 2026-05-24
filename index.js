@@ -30,7 +30,9 @@ async function urlToGenerativePart(url) {
 // دالة الحل الذكية بواسطة Gemini AI
 async function solveCaptchaWithAI(imageUrl) {
     console.log("👁️ جاري التحليل البصري الذكي للصورة...");
-    try {const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    // استبدل السطر القديم بهذا السطر:
+const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+
 
         const imagePart = await urlToGenerativePart(imageUrl);
         const prompt = "في هذه الصورة يوجد عدة رموز. استخرج الرمز الموجود داخل المربع المظلل أو المميز فقط. أجب بالرمز المكون من 4 خانات فقط بدون أي كلمات إضافية.";
