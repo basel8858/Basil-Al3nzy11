@@ -1,9 +1,9 @@
 {
-  "name": "wolf-xo-bot",
-  "version": "1.0.0",
-  "type": "module",
   "dependencies": {
-    "wolf.js": "latest",
-    "dotenv": "^16.4.5"
+    "wolf.js": "^latest",
+    "dotenv": "^latest",
+    "tesseract.js": "^5.0.0",
+    "sharp": "^0.33.0",
+    "axios": "^1.6.0"
   }
 }
