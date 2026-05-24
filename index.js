@@ -1,130 +1,48 @@
 import 'dotenv/config';
 import wolfjs from 'wolf.js';
-import Tesseract from 'tesseract.js';
-import axios from 'axios';
-import sharp from 'sharp';
 
 const { WOLF } = wolfjs;
 
-// الإعدادات
 const settings = {
     identity: process.env.U_MAIL || 'your_email@example.com',
     secret: process.env.U_PASS || 'your_password',
-    taskGroupId: 81889058,
-    depositGroupId: 81889058,
-    tasksInterval: 63 * 1000, 
-    boxInterval: 3 * 60 * 1000 
+    // تأكد أن هذا الرقم هو رقم القروب الصحيح
+    taskGroupId: 81889058 
 };
 
-const MY_INFO = { myId: "80055399" };
 const service = new WOLF();
 
+// دالة تأخير
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-// دالة التعرف على الصور (OCR)
-async function solveCaptcha(imageUrl) {
-    try {
-        const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-        // معالجة الصورة لتسهيل القراءة (تحويلها لأبيض وأسود حاد)
-        const processed = await sharp(response.data)
-            .greyscale()
-            .threshold(128)
-            .toBuffer();
-
-        const { data: { text } } = await Tesseract.recognize(processed, 'eng');
-        // البحث عن أي نص مكون من حروف وأرقام (مثل GYG)
-        const match = text.match(/[A-Z0-9]{3,}/i);
-        return match ? match[0] : null;
-    } catch (e) {
-        console.error("خطأ في حل الصورة:", e);
-        return null;
-    }
-}
-
-service.on('groupMessage', async (message) => {
-    try {
-        const content = message.body;
-        const isTargetGroup = message.targetGroupId === settings.taskGroupId || message.targetGroupId === settings.depositGroupId;
-        if (!isTargetGroup) return;
-
-        // --- 1. التعامل مع فخاخ الصور (Captcha) ---
-        if (message.attachments && message.attachments.length > 0 && content.includes("تحقق")) {
-            await delay(3000); 
-            const answer = await solveCaptcha(message.attachments[0].link);
-            if (answer) {
-                await service.messaging.sendGroupMessage(message.targetGroupId, `#${answer}`);
-                return; 
-            }
-        }
-
-        // --- 2. التعامل مع الفخاخ النصية ---
-        if (content.includes("تحقق") && content.includes(MY_INFO.myId)) {
-            await delay(3000);
-
-            if (content.includes("العلامتين")) {
-                const symMatch = content.match(/العلامتين\s*([^\s\w\u0600-\u06FF])\s*و\s*([^\s\w\u0600-\u06FF])/u);
-                if (symMatch) {
-                    const pattern = new RegExp(`${escapeRegExp(symMatch[1])}(.*?)${escapeRegExp(symMatch[2])}`, 'gu');
-                    const matches = [...content.matchAll(pattern)];
-                    if (matches.length > 0) {
-                        const target = matches.length > 1 ? matches[1] : matches[0];
-                        await service.messaging.sendGroupMessage(message.targetGroupId, `#${target[1].trim()}`);
-                    }
-                }
-            }
-            else if (content.includes("داخل القوسين")) {
-                const match = content.match(/\((.*?)\)/);
-                if (match) await service.messaging.sendGroupMessage(message.targetGroupId, `#${match[1].trim()}`);
-            }
-            else if (content.includes("الأقواس المعقوفة")) {
-                const match = content.match(/\{(.*?)\}/);
-                if (match) await service.messaging.sendGroupMessage(message.targetGroupId, `#${match[1].trim()}`);
-            }
-            else if (content.includes("يمين") || content.includes("يسار")) {
-                const symMatch = content.match(/للعلامة\s*([^\s])/u);
-                const dirMatch = content.match(/(اليمين|يمين|اليسار|يسار)/u);
-                if (symMatch && dirMatch) {
-                    const regex = new RegExp(`([^\\s]+)\\s*${escapeRegExp(symMatch[1])}\\s*([^\\s]+)`, 'gu');
-                    const matches = [...content.matchAll(regex)];
-                    if (matches.length > 0) {
-                        const target = matches.length > 1 ? matches[1] : matches[0];
-                        const answer = dirMatch[0].includes("يمين") ? target[2] : target[1];
-                        await service.messaging.sendGroupMessage(message.targetGroupId, `#${answer}`);
-                    }
-                }
-            }
-            else if (content.includes("الرمز رقم")) {
-                const indexMatch = content.match(/رقم\s*(\d+)/u);
-                const listMatch = content.match(/⁦(.*?)\s*⁩/u);
-                if (indexMatch && listMatch) {
-                    const items = listMatch[1].split('|').map(s => s.trim());
-                    const index = parseInt(indexMatch[1]) - 1;
-                    if (items[index]) {
-                        await service.messaging.sendGroupMessage(message.targetGroupId, `#${items[index]}`);
-                    }
-                }
-            }
-        }
-    } catch (err) { console.error("خطأ:", err); }
-});
 
 service.on('ready', async () => {
-    console.log(`🚀 البوت نشط بكل الأنظمة.`);
-    await service.group.joinById(settings.taskGroupId);
-    await service.group.joinById(settings.depositGroupId);
+    console.log(`🚀 البوت يعمل الآن!`);
+    console.log(`جارٍ محاولة الانضمام للقروب: ${settings.taskGroupId}`);
+    
+    try {
+        await service.group.joinById(settings.taskGroupId);
+        console.log("✅ تم طلب الانضمام للقروب بنجاح.");
+    } catch (err) {
+        console.error("❌ فشل الانضمام للقروب:", err);
+    }
+});
 
-    // جدولة المهام
-    setInterval(async () => {
-        await service.messaging.sendGroupMessage(settings.taskGroupId, '!مد مهام');
-        await delay(2000);
-        await service.messaging.sendGroupMessage(settings.depositGroupId, '!مد تحالف ايداع كل');
-    }, settings.tasksInterval);
+// هذا الجزء هو "عين البوت"
+service.on('groupMessage', async (message) => {
+    // طباعة كل رسالة تصل للبوت للتحقق من الاتصال
+    console.log("-----------------------------------------");
+    console.log("📩 رسالة وصلت:");
+    console.log("القروب ID:", message.targetGroupId);
+    console.log("نص الرسالة:", message.body);
+    console.log("-----------------------------------------");
 
-    // جدولة الصناديق
-    setInterval(async () => {
-        await service.messaging.sendGroupMessage(settings.taskGroupId, '!مد صندوق فتح');
-    }, settings.boxInterval);
+    // تحقق بسيط
+    if (message.targetGroupId === settings.taskGroupId) {
+        if (message.body.includes("تحقق")) {
+            console.log("⚠️ تم رصد كلمة 'تحقق'! جاري محاولة الرد...");
+            await service.messaging.sendGroupMessage(message.targetGroupId, "تم استلام رسالة التحقق، يرجى فحص الكونسول.");
+        }
+    }
 });
 
 service.login(settings.identity, settings.secret);
