@@ -6,98 +6,104 @@ import { createWorker } from 'tesseract.js';
 const { WOLF } = wolfjs;
 const client = new WOLF();
 
-// الإعدادات المحددة
-const TARGET_USER_ID = 76023604;
-const CHANNEL_ID = 224;
-const INTERVAL_MS = 63000; // 63 ثانية
+// الإعدادات
+const TARGET_USER_ID = 51660277;
+const CHANNEL_ID = 81889058;
+const INTERVAL_MS = 63000;
 
 client.on('ready', async () => {
-    console.log("🚀 البوت متصل ومستعد!");
+    console.log("🚀 البوت متصل ومستعد للعمل التلقائي!");
     await client.group.joinById(CHANNEL_ID);
-
-    // بدء حلقة الأتمتة فور تشغيل البوت
     startAutomation();
 });
 
-// دالة الأتمتة (تكرار الأوامر)
+// 1. نظام الأتمتة (كل 63 ثانية)
 async function startAutomation() {
     setInterval(async () => {
         try {
-            console.log("⏳ جاري إرسال أوامر التمديد التلقائية...");
-            
-            // 1. إرسال أمر المهام
+            console.log("⏳ جاري إرسال أوامر التمديد...");
             await client.messaging.sendGroupMessage(CHANNEL_ID, '!مد مهام');
-            
-            // 2. انتظار ثانيتين (2000 مللي ثانية)
             await new Promise(resolve => setTimeout(resolve, 2000));
-            
-            // 3. إرسال أمر التحالف
             await client.messaging.sendGroupMessage(CHANNEL_ID, '!مد تحالف ايداع كل');
-            
         } catch (err) {
-            console.error("❌ خطأ أثناء إرسال الأوامر التلقائية:", err.message);
+            console.error("❌ خطأ في الأتمتة:", err.message);
         }
     }, INTERVAL_MS);
 }
 
+// 2. نظام المراقبة والتحقق
 client.on('groupMessage', async (message) => {
-    // شرط: التأكد أن الرسالة من العضو المطلوب وفي القناة المطلوبة فقط
-    if (message.sourceSubscriberId == TARGET_USER_ID && message.targetGroupId == CHANNEL_ID) {
-        const imageUrl = message.body || (message.attachments && message.attachments[0]?.link);
+    if (message.sourceSubscriberId != TARGET_USER_ID || message.targetGroupId != CHANNEL_ID) return;
 
-        if (imageUrl && (imageUrl.endsWith('.jpg') || imageUrl.endsWith('.jpeg') || imageUrl.endsWith('.png'))) {
-            
-            try {
-                // محاولة الاستخراج (هذه الدالة ستفشل تلقائياً إذا لم تجد الإطار الأصفر)
-                const code = await solveCaptcha(imageUrl);
-                
-                // إذا نجح الاستخراج، يرسل الرمز
-                await client.messaging.sendGroupMessage(CHANNEL_ID, `#${code}`);
-                console.log(`✅ تم استخراج وإرسال الرمز: #${code}`);
-                
-            } catch (err) {
-                // إذا لم تجد الدالة الإطار الأصفر (أو حدث خطأ)، سيقفز الكود هنا
-                // نحن نتجاهل هذا الخطأ (لا نرسل شيئاً للقناة) لأن الصورة ليست كابتشا
-                if (err.message !== "لم يتم العثور على الإطار الأصفر") {
-                    console.error("⚠️ خطأ في معالجة الصورة:", err.message);
-                }
-            }
+    const imageUrl = message.body || (message.attachments && message.attachments[0]?.link);
+    if (!imageUrl) return;
+
+    try {
+        const response = await fetch(imageUrl);
+        const buffer = Buffer.from(await response.arrayBuffer());
+
+        // التحقق أولاً: هل هذه الصورة كابتشا؟
+        const isCaptcha = await isCaptchaImage(buffer);
+        if (!isCaptcha) return; // تجاهل أي صورة لا تحمل عنوان اختبار
+
+        // إذا كانت كابتشا، نبدأ الحل
+        console.log("🛡️ كابتشا تم اكتشافها! جاري المعالجة...");
+        const code = await solveCaptcha(buffer);
+        
+        if (code) {
+            await client.messaging.sendGroupMessage(CHANNEL_ID, `#${code}`);
+            console.log(`✅ تم الإرسال: #${code}`);
         }
+    } catch (err) {
+        console.error("⚠️ خطأ في المعالجة:", err.message);
     }
 });
 
-async function solveCaptcha(url) {
-    const response = await fetch(url);
-    const buffer = Buffer.from(await response.arrayBuffer());
+// وظيفة: التحقق هل الصورة كابتشا فعلاً عبر قراءة النص العلوي
+async function isCaptchaImage(buffer) {
+    try {
+        const headerBuffer = await sharp(buffer)
+            .extract({ left: 0, top: 0, width: 1000, height: 300 })
+            .greyscale()
+            .threshold(150)
+            .toBuffer();
 
+        const worker = await createWorker('ara');
+        const { data: { text } } = await worker.recognize(headerBuffer);
+        await worker.terminate();
+
+        // نتحقق من وجود كلمات تدل على كابتشا
+        return text.includes('اختبار') || text.includes('تحقق');
+    } catch (e) {
+        return false;
+    }
+}
+
+// وظيفة: استخراج الرمز من الإطار الأصفر
+async function solveCaptcha(buffer) {
     const { data, info } = await sharp(buffer).raw().ensureAlpha().toBuffer({ resolveWithObject: true });
     let minX = info.width, minY = info.height, maxX = 0, maxY = 0, found = false;
 
-    // البحث عن الإطار الأصفر
     for (let y = 0; y < info.height; y++) {
         for (let x = 0; x < info.width; x++) {
             const idx = (y * info.width + x) * 4;
-            // شرط اللون الأصفر (أحمر + أخضر عالي، أزرق منخفض)
+            // البحث عن اللون الأصفر
             if (data[idx] > 200 && data[idx + 1] > 200 && data[idx + 2] < 100) {
                 minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
                 found = true;
             }
         }
     }
-    
-    // إذا لم يجد الإطار، يتوقف هنا (يتجاهل الصورة)
     if (!found) throw new Error("لم يتم العثور على الإطار الأصفر");
 
-    const margin = 8;
-    const cropX = minX + margin;
-    const cropY = minY + margin;
-    const cropWidth = (maxX - minX) - (margin * 2);
-    const cropHeight = (maxY - minY) - (margin * 2);
-
-    if (cropWidth <= 0 || cropHeight <= 0) throw new Error("البطاقة صغيرة جداً");
-
+    const margin = 10;
     const processedBuffer = await sharp(buffer)
-        .extract({ left: cropX, top: cropY, width: cropWidth, height: cropHeight })
+        .extract({ 
+            left: minX + margin, 
+            top: minY + margin, 
+            width: (maxX - minX) - (margin * 2), 
+            height: (maxY - minY) - (margin * 2) 
+        })
         .greyscale()
         .normalize()
         .linear(1.5, -0.2)
@@ -109,9 +115,7 @@ async function solveCaptcha(url) {
     const { data: { text } } = await worker.recognize(processedBuffer);
     await worker.terminate();
 
-    const result = text.replace(/[^a-zA-Z0-9\u0621-\u064A]/g, '').trim();
-    if (!result) throw new Error("لم يتم استخراج نص واضح");
-    return result;
+    return text.replace(/[^a-zA-Z0-9\u0621-\u064A]/g, '').trim();
 }
 
 client.login(process.env.U_MAIL, process.env.U_PASS);
