@@ -1,25 +1,36 @@
-name: Node.js Bot
+name: XO Bot Runner
 
-on: [push]
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: xobot-group
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '20'
-        
-    - name: Install dependencies
-      run: npm install
-        
-    - name: Run Bot
-      env:
-        # هنا نربط الـ Secrets الموجودة في إعدادات GitHub بالمتغيرات
-        U_MAIL: ${{ secrets.U_MAIL }}
-        U_PASS: ${{ secrets.U_PASS }}
-      run: npm start
 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install --no-audit --no-fund
+          
+      - name: Run Bot
+        env:
+          U_MAIL: ${{ secrets.U_MAIL }}
+          U_PASS: ${{ secrets.U_PASS }}
+        run: node index.js
