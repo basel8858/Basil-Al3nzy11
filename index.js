@@ -6,22 +6,19 @@ import { createWorker } from 'tesseract.js';
 const { WOLF } = wolfjs;
 const client = new WOLF();
 
-// الإعدادات
 const TARGET_USER_ID = 51660277;
 const CHANNEL_ID = 81889058;
 const INTERVAL_MS = 63000;
 
 client.on('ready', async () => {
-    console.log("🚀 البوت متصل ومستعد للعمل التلقائي!");
+    console.log("🚀 البوت متصل ومستعد!");
     await client.group.joinById(CHANNEL_ID);
     startAutomation();
 });
 
-// 1. نظام الأتمتة (كل 63 ثانية)
 async function startAutomation() {
     setInterval(async () => {
         try {
-            console.log("⏳ جاري إرسال أوامر التمديد...");
             await client.messaging.sendGroupMessage(CHANNEL_ID, '!مد مهام');
             await new Promise(resolve => setTimeout(resolve, 2000));
             await client.messaging.sendGroupMessage(CHANNEL_ID, '!مد تحالف ايداع كل');
@@ -31,23 +28,25 @@ async function startAutomation() {
     }, INTERVAL_MS);
 }
 
-// 2. نظام المراقبة والتحقق
 client.on('groupMessage', async (message) => {
+    // فلتر القناة والمستخدم
     if (message.sourceSubscriberId != TARGET_USER_ID || message.targetGroupId != CHANNEL_ID) return;
 
-    const imageUrl = message.body || (message.attachments && message.attachments[0]?.link);
+    // فلتر الرسائل النصية (لا يعالج إلا الصور)
+    if (!message.attachments || message.attachments.length === 0) return;
+
+    const imageUrl = message.attachments[0].link;
     if (!imageUrl) return;
 
     try {
         const response = await fetch(imageUrl);
         const buffer = Buffer.from(await response.arrayBuffer());
 
-        // التحقق أولاً: هل هذه الصورة كابتشا؟
+        // التحقق النصي (هل الصورة كابتشا؟)
         const isCaptcha = await isCaptchaImage(buffer);
-        if (!isCaptcha) return; // تجاهل أي صورة لا تحمل عنوان اختبار
+        if (!isCaptcha) return; 
 
-        // إذا كانت كابتشا، نبدأ الحل
-        console.log("🛡️ كابتشا تم اكتشافها! جاري المعالجة...");
+        console.log("🛡️ تم اكتشاف كابتشا، جاري الحل...");
         const code = await solveCaptcha(buffer);
         
         if (code) {
@@ -55,11 +54,10 @@ client.on('groupMessage', async (message) => {
             console.log(`✅ تم الإرسال: #${code}`);
         }
     } catch (err) {
-        console.error("⚠️ خطأ في المعالجة:", err.message);
+        console.error("⚠️ خطأ في معالجة المرفق:", err.message);
     }
 });
 
-// وظيفة: التحقق هل الصورة كابتشا فعلاً عبر قراءة النص العلوي
 async function isCaptchaImage(buffer) {
     try {
         const headerBuffer = await sharp(buffer)
@@ -72,14 +70,12 @@ async function isCaptchaImage(buffer) {
         const { data: { text } } = await worker.recognize(headerBuffer);
         await worker.terminate();
 
-        // نتحقق من وجود كلمات تدل على كابتشا
         return text.includes('اختبار') || text.includes('تحقق');
     } catch (e) {
         return false;
     }
 }
 
-// وظيفة: استخراج الرمز من الإطار الأصفر
 async function solveCaptcha(buffer) {
     const { data, info } = await sharp(buffer).raw().ensureAlpha().toBuffer({ resolveWithObject: true });
     let minX = info.width, minY = info.height, maxX = 0, maxY = 0, found = false;
@@ -87,7 +83,6 @@ async function solveCaptcha(buffer) {
     for (let y = 0; y < info.height; y++) {
         for (let x = 0; x < info.width; x++) {
             const idx = (y * info.width + x) * 4;
-            // البحث عن اللون الأصفر
             if (data[idx] > 200 && data[idx + 1] > 200 && data[idx + 2] < 100) {
                 minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
                 found = true;
