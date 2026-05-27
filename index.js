@@ -6,12 +6,14 @@ import { createWorker } from 'tesseract.js';
 const { WOLF } = wolfjs;
 const client = new WOLF();
 
-const TARGET_USER_ID = 51660277;
-const CHANNEL_ID = 81889058;
+// --- الإعدادات ---
+const CHANNEL_ID = 81889058;    // القناة المطلوبة
+const BOT_ID = 51660277;        // عضوية البوت (لمنع التداخل)
 const INTERVAL_MS = 63000;
 
 client.on('ready', async () => {
-    console.log("🚀 البوت متصل! يعتمد الآن على تحليل اللون الأحمر (بدون قراءة نصوص).");
+    console.log(`🚀 البوت متصل! (ID: ${BOT_ID})`);
+    console.log(`📡 يعمل في القناة: ${CHANNEL_ID}`);
     await client.group.joinById(CHANNEL_ID);
     startAutomation();
 });
@@ -28,66 +30,84 @@ async function startAutomation() {
     }, INTERVAL_MS);
 }
 
-// دالة فحص نسبة اللون الأحمر
+// دالة فحص اللون (للتأكد أنها كابتشا)
 async function isCaptchaByColor(buffer) {
     const { data, info } = await sharp(buffer).raw().ensureAlpha().toBuffer({ resolveWithObject: true });
-    
     let redPixels = 0;
     const totalPixels = info.width * info.height;
-
-    // المرور على كل بكسل في الصورة
     for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-
-        // شرط: إذا كان اللون أحمر داكن (خلفية الكابتشا)
-        // يمكنك تعديل الأرقام (120 مثلاً) إذا وجدت دقة أكبر
-        if (r > 120 && r > (g + 30) && r > (b + 30)) {
-            redPixels++;
-        }
+        // فحص اللون الأحمر
+        if (data[i] > 120 && data[i] > (data[i + 1] + 30) && data[i] > (data[i + 2] + 30)) redPixels++;
     }
-
     const percentage = (redPixels / totalPixels) * 100;
-    console.log(`📊 نسبة اللون الأحمر في الصورة: ${percentage.toFixed(2)}%`);
-
-    // إذا كانت النسبة أعلى من 40% فهي كابتشا (يمكنك تعديل هذه النسبة)
     return percentage > 40;
 }
 
-client.on('groupMessage', async (message) => {
-    if (message.targetGroupId != CHANNEL_ID || message.sourceSubscriberId != TARGET_USER_ID) return;
-    if (message.type !== 'text/image_link') return;
-
-    const imageUrl = message.body;
-    
+// دالة استخراج اسم اللاعب
+async function extractPlayerName(buffer) {
     try {
-        const response = await fetch(imageUrl);
-        const buffer = Buffer.from(await response.arrayBuffer());
-
-        // 1. الفحص: هل هي صورة كابتشا (بناءً على اللون)؟
-        const isCaptcha = await isCaptchaByColor(buffer);
+        const metadata = await sharp(buffer).metadata();
+        const { width, height } = metadata;
         
-        if (!isCaptcha) {
-            console.log("⏭️ تم تجاهل الصورة (نسبة اللون الأحمر منخفضة).");
-            return;
-        }
+        // القص بناءً على الإحداثيات المطلوبة
+        const extractOptions = {
+            left: Math.floor(width * 0.70),
+            top: Math.floor(height * 0.10),
+            width: Math.floor(width * 0.25),
+            height: Math.floor(height * 0.05)
+        };
 
-        // 2. إذا كانت كابتشا، نحللها
-        console.log("🛡️ كابتشا مكتشفة باللون! جاري الحل...");
-        const code = await solveCaptcha(buffer);
+        const croppedBuffer = await sharp(buffer)
+            .extract(extractOptions)
+            .greyscale()
+            .threshold(150)
+            .toBuffer();
+
+        const worker = await createWorker('ara+eng');
+        const { data: { text } } = await worker.recognize(croppedBuffer);
+        await worker.terminate();
+        return text.trim();
+    } catch (e) {
+        return "غير معروف";
+    }
+}
+
+client.on('groupMessage', async (message) => {
+    // فلتر القناة
+    if (message.targetGroupId != CHANNEL_ID) return;
+    
+    // منع البوت من التفاعل مع رسائله الخاصة
+    if (message.sourceSubscriberId == BOT_ID) return;
+
+    // معالجة الصور فقط
+    if (message.type === 'text/image_link') {
+        const imageUrl = message.body;
         
-        if (code) {
-            await client.messaging.sendGroupMessage(CHANNEL_ID, `#${code}`);
-            console.log(`✅ تم الإرسال: #${code}`);
+        try {
+            const response = await fetch(imageUrl);
+            const buffer = Buffer.from(await response.arrayBuffer());
+
+            // 1. التحقق من أنها كابتشا
+            const isCaptcha = await isCaptchaByColor(buffer);
+            if (!isCaptcha) return;
+
+            // 2. استخراج الاسم وطباعته في الكونسول
+            const playerName = await extractPlayerName(buffer);
+            console.log(`👤 اسم اللاعب في البطاقة: ${playerName}`);
+            
+            // 3. حل الكابتشا
+            const code = await solveCaptcha(buffer);
+            if (code) {
+                await client.messaging.sendGroupMessage(CHANNEL_ID, `#${code}`);
+                console.log(`✅ تم الإرسال: #${code}`);
+            }
+        } catch (err) {
+            console.error("⚠️ خطأ في المعالجة:", err.message);
         }
-    } catch (err) {
-        console.error("⚠️ خطأ في معالجة الصورة:", err.message);
     }
 });
 
 async function solveCaptcha(buffer) {
-    // هذه الدالة ستبقى كما هي لأنها المتخصصة باستخراج النص
     const { data, info } = await sharp(buffer).raw().ensureAlpha().toBuffer({ resolveWithObject: true });
     let minX = info.width, minY = info.height, maxX = 0, maxY = 0, found = false;
 
@@ -100,8 +120,7 @@ async function solveCaptcha(buffer) {
             }
         }
     }
-    
-    if (!found) throw new Error("لا يوجد إطار أصفر للحل");
+    if (!found) return null;
 
     const margin = 10;
     const processedBuffer = await sharp(buffer)
