@@ -18,17 +18,34 @@ client.on('ready', async () => {
     startAutomation();
 });
 
+// نقوم بتعديل الدالة لتعمل بنظام الانتظار بعد التنفيذ
 async function startAutomation() {
-    setInterval(async () => {
+    // نحدد وقت الانتظار هنا (66000 ميللي ثانية = 66 ثانية)
+    // أضفنا 3 ثوانٍ إضافية لحل مشكلة التقديم التي تواجهها
+    const DELAY_MS = 63000; 
+
+    async function runTask() {
         try {
+            console.log("🕒 بدء المهام...");
             await client.messaging.sendGroupMessage(CHANNEL_ID, '!مد مهام');
+            
+            // انتظار ثانيتين بين الأمرين
             await new Promise(resolve => setTimeout(resolve, 2000));
+            
             await client.messaging.sendGroupMessage(CHANNEL_ID, '!مد تحالف ايداع كل');
+            console.log("✅ تم إرسال المهام بنجاح.");
         } catch (err) {
             console.error("❌ خطأ في الأتمتة:", err.message);
         }
-    }, INTERVAL_MS);
+
+        // هنا السحر: ننتظر انتهاء المهمة ثم نضبط المؤقت للعملية التالية
+        setTimeout(runTask, DELAY_MS);
+    }
+
+    // تشغيل العملية الأولى
+    runTask();
 }
+
 
 // دالة فحص نسبة اللون الأحمر
 async function isCaptchaByColor(buffer) {
