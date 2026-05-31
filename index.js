@@ -9,7 +9,7 @@ const client = new WOLF();
 // --- الإعدادات ---
 const TARGET_USER_ID = 76023604; 
 const CHANNEL_TASKS = 224;       // قناة المهام
-const CHANNEL_ALLIANCE = 224;    // قناة التحالف (غير الرقم حسب رغبتك)
+const CHANNEL_ALLIANCE = 224;    // قناة التحالف
 const TARGET_PLAYER_NAME = 'cat'; 
 
 client.on('ready', async () => {
@@ -23,6 +23,27 @@ client.on('ready', async () => {
 async function startAutomation() {
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+    // 1. مهمة الصندوق فتح كل 5 دقائق (300,000 مللي ثانية)
+    setInterval(async () => {
+        try {
+            await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق فتح');
+            console.log(`✅ تم إرسال "!مد صندوق فتح" تلقائياً`);
+        } catch (err) {
+            console.error("❌ خطأ في إرسال صندوق الفتح:", err.message);
+        }
+    }, 5 * 60 * 1000);
+
+    // 2. مهمة صندوق ضمان وقت كل ساعة (3,600,000 مللي ثانية)
+    setInterval(async () => {
+        try {
+            await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق ضمان وقت');
+            console.log(`✅ تم إرسال "!مد صندوق ضمان وقت" تلقائياً`);
+        } catch (err) {
+            console.error("❌ خطأ في إرسال صندوق الضمان:", err.message);
+        }
+    }, 60 * 60 * 1000);
+
+    // الحلقة الأساسية للأوامر الدورية
     while (true) {
         try {
             // 1. إرسال أمر المهام للقناة الأولى
