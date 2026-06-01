@@ -75,11 +75,6 @@ client.on('ready', async () => {
     await client.group.joinById(CHANNEL_ALLIANCE);
     
     await requestBoxStatus(); // طلب الحالة فور التشغيل
-    
-    // المهام الدورية
-    setInterval(async () => { try { await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق فتح'); } catch (err) {} }, 5 * 60 * 1000);
-    setInterval(async () => { try { await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق ضمان وقت'); } catch (err) {} }, 60 * 60 * 1000);
-    setInterval(async () => { await requestBoxStatus(); }, 30 * 60 * 1000);
 
     // حلقة المهام
     while (true) {
