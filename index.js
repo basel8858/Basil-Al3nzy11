@@ -1,4 +1,4 @@
-Import 'dotenv/config';
+import 'dotenv/config';
 import wolfjs from 'wolf.js';
 import sharp from 'sharp';
 import { createWorker } from 'tesseract.js';
@@ -8,11 +8,10 @@ const client = new WOLF();
 
 // --- الإعدادات ---
 const TARGET_USER_ID = 76023604; 
-const CHANNEL_TASKS = 224;       // قناة المهام
-const CHANNEL_ALLIANCE = 224;    // قناة التحالف
+const CHANNEL_TASKS = 224;       
+const CHANNEL_ALLIANCE = 224;    
 const TARGET_PLAYER_NAME = 'cat'; 
 
-// متغير لتتبع وقت آخر أمر تم إرساله
 let lastCommandTime = 0;
 
 client.on('ready', async () => {
@@ -23,8 +22,6 @@ client.on('ready', async () => {
 });
 
 // --- الأتمتة ---
-async function startAutomation() {
-    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 async function startAutomation() {
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -47,21 +44,20 @@ async function startAutomation() {
             console.error("❌ خطأ في إرسال صندوق الضمان:", err.message);
         }
     }, 60 * 60 * 1000);
+
     while (true) {
         try {
-            // تحديث وقت إرسال الأمر
             lastCommandTime = Date.now();
             await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد مهام');
             console.log(`✅ تم إرسال "!مد مهام" للقناة ${CHANNEL_TASKS}`);
 
             await sleep(2000);
 
-            // تحديث وقت إرسال الأمر
             lastCommandTime = Date.now();
             await client.messaging.sendGroupMessage(CHANNEL_ALLIANCE, '!مد تحالف ايداع كل');
             console.log(`✅ تم إرسال "!مد تحالف ايداع كل" للقناة ${CHANNEL_ALLIANCE}`);
 
-            await sleep(64000); // انتظار 64 ثانية للدورة التالية
+            await sleep(64000); 
         } catch (err) {
             console.error("❌ خطأ في الأتمتة:", err.message);
             await sleep(5000);
@@ -122,12 +118,10 @@ async function solveCaptcha(buffer) {
 
 // --- الاستقبال ---
 client.on('groupMessage', async (message) => {
-    // 1. التحقق من القناة والمرسل
     const isTargetChannel = (message.targetGroupId === CHANNEL_TASKS || message.targetGroupId === CHANNEL_ALLIANCE);
     if (!isTargetChannel || message.sourceSubscriberId != TARGET_USER_ID) return;
     if (message.type !== 'text/image_link') return;
 
-    // 2. التحقق من نافذة الـ 4 ثواني (يجب أن تكون الرسالة خلال 4000 مللي ثانية من آخر أمر)
     const timeDiff = Date.now() - lastCommandTime;
     if (timeDiff > 4000) return;
 
@@ -140,7 +134,6 @@ client.on('groupMessage', async (message) => {
         const name = await extractPlayerName(buffer);
         console.log(`👤 اللاعب المكتشف: ${name}`);
 
-        // 3. التحقق من التطابق الدقيق للاسم باستخدام Regex (كلمة "cat" فقط)
         const regex = new RegExp(`\\b${TARGET_PLAYER_NAME}\\b`, 'i');
         
         if (!regex.test(name)) {
