@@ -12,16 +12,34 @@ const CHANNEL_TASKS = 224;
 const CHANNEL_ALLIANCE = 224;
 const TARGET_PLAYER_NAME = 'cat';
 
-// متغيرات التحكم في الأتمتة
+// متغيرات التحكم
 let currentInterval = 306000; // الافتراضي 306 ثانية
 let isWaitingForBoxStatus = false;
 let lastBoxCommandTime = 0;
-let resetTimer = null; // للمؤقت الخاص بإعادة السرعة للوضع الطبيعي
+let resetTimer = null;
+
+// وظيفة موحدة لطلب الصندوق
+async function requestBoxStatus() {
+    try {
+        await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق');
+        isWaitingForBoxStatus = true;
+        lastBoxCommandTime = Date.now();
+        // إلغاء حالة الانتظار بعد 4 ثوانٍ
+        setTimeout(() => { isWaitingForBoxStatus = false; }, 4000);
+        console.log("📤 تم طلب !مد صندوق (للتحقق من الجهاز الزمني)");
+    } catch (err) {
+        console.error("❌ خطأ في طلب الصندوق:", err.message);
+    }
+}
 
 client.on('ready', async () => {
     console.log(`🚀 البوت متصل! يراقب القناتين: ${CHANNEL_TASKS} و ${CHANNEL_ALLIANCE}`);
     await client.group.joinById(CHANNEL_TASKS);
     await client.group.joinById(CHANNEL_ALLIANCE);
+    
+    // طلب البيانات فور التشغيل
+    await requestBoxStatus();
+    
     startAutomation();
 });
 
@@ -45,15 +63,7 @@ async function startAutomation() {
 
     // 3. مهمة طلب حالة الصناديق كل 30 دقيقة
     setInterval(async () => {
-        try {
-            await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق');
-            isWaitingForBoxStatus = true;
-            lastBoxCommandTime = Date.now();
-            // إلغاء الانتظار بعد 4 ثوانٍ
-            setTimeout(() => { isWaitingForBoxStatus = false; }, 4000);
-        } catch (err) {
-            console.error("❌ خطأ في طلب الصندوق:", err.message);
-        }
+        await requestBoxStatus();
     }, 30 * 60 * 1000);
 
     // الحلقة الأساسية للأوامر الدورية
@@ -74,7 +84,7 @@ async function startAutomation() {
 
 // --- معالجة الرسائل ---
 client.on('groupMessage', async (message) => {
-    // 1. معالجة حالة الجهاز الزمني (فقط إذا كان المستخدم المستهدف هو المرسل)
+    // 1. معالجة حالة الجهاز الزمني
     if (message.sourceSubscriberId === TARGET_USER_ID && isWaitingForBoxStatus) {
         if (Date.now() - lastBoxCommandTime < 4000) {
             const body = message.body;
@@ -82,24 +92,20 @@ client.on('groupMessage', async (message) => {
             
             if (timeMatch) {
                 const status = timeMatch[1].trim();
-                
-                // مسح أي مؤقت قديم إذا كان موجوداً
                 if (resetTimer) clearTimeout(resetTimer);
 
                 if (status.includes('غير نشط')) {
                     currentInterval = 306000;
                     console.log("⚠️ الجهاز الزمني غير نشط. الفاصل: 306 ثانية.");
                 } else {
-                    // استخراج الدقائق والثواني
                     const minMatch = status.match(/(\d+)د/);
                     const secMatch = status.match(/(\d+)ث/);
                     const totalSeconds = (minMatch ? parseInt(minMatch[1]) * 60 : 0) + (secMatch ? parseInt(secMatch[1]) : 0);
                     
                     if (totalSeconds > 0) {
-                        currentInterval = 64000; // السرعة السريعة
+                        currentInterval = 64000; 
                         console.log(`✅ الجهاز الزمني نشط (${status}). الفاصل: 64 ثانية.`);
                         
-                        // إعادة الفاصل للوضع البطيء بعد انتهاء الوقت
                         resetTimer = setTimeout(() => {
                             currentInterval = 306000;
                             console.log("⏱️ انتهى وقت الجهاز الزمني. العودة للفاصل 306 ثانية.");
