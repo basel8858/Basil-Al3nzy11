@@ -2,168 +2,20 @@ import 'dotenv/config';
 import wolfjs from 'wolf.js';
 import sharp from 'sharp';
 import { createWorker } from 'tesseract.js';
+import fetch from 'node-fetch';
 
 const { WOLF } = wolfjs;
 const client = new WOLF();
 
 // --- الإعدادات ---
-const TARGET_USER_ID = 76023604; 
-const CHANNEL_TASKS = 224;
-const CHANNEL_ALLIANCE = 224;
-const TARGET_PLAYER_NAME = 'cat';
+const TARGET_USER_ID = 76023604;
+const CHANNEL_ID = 224;
+const ALLOWED_PLAYERS = ['cat'];
 
-// متغيرات التحكم
-let currentInterval = 306000;
-let isWaitingForBoxStatus = false;
-let lastBoxCommandTime = 0;
-let resetTimer = null;
+// متغير عالمي للتايمر
+let globalTimer = 0;
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-async function requestBoxStatus() {
-    try {
-        await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق');
-        isWaitingForBoxStatus = true;
-        lastBoxCommandTime = Date.now();
-        console.log("📤 تم إرسال طلب !مد صندوق. بانتظار الرد...");
-        // الانتظار لمدة 10 ثوانٍ كحد أقصى للرد
-        setTimeout(() => { if (isWaitingForBoxStatus) console.log("⚠️ انتهى وقت انتظار الرد."); isWaitingForBoxStatus = false; }, 10000); 
-    } catch (err) {
-        console.error("❌ خطأ في طلب الصندوق:", err.message);
-    }
-}
-
-// دالة فتح الصناديق حسب الأولوية
-async function manageGuaranteePoints(points, gold, silver, bronze, isReady) {
-    let currentPoints = points;
-    let g = gold, s = silver, b = bronze;
-
-    console.log(`📊 بدء إدارة نقاط الضمان: ${points}/50 | الحالة: ${isReady ? 'جاهز' : 'غير جاهز'}`);
-
-    while (true) {
-        // شرط التوقف: حالة "جاهز" والنقاط بين 40 و 45
-        if (isReady && currentPoints >= 40 && currentPoints <= 45) {
-            console.log(`✅ تم الوصول للوضع الطبيعي (${currentPoints}/50 و جاهز). التوقف عن الفتح.`);
-            break;
-        }
-
-        if (g === 0 && s === 0 && b === 0) {
-            console.log("⚠️ نفدت جميع الصناديق المتوفرة.");
-            break;
-        }
-
-        if (g > 0) {
-            await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق فتح ذهبي');
-            g--; currentPoints += 4;
-        } else if (s > 0) {
-            await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق فتح فضي');
-            s--; currentPoints += 2;
-        } else if (b > 0) {
-            await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق فتح برونزي');
-            b--; currentPoints += 1;
-        }
-        
-        isReady = (currentPoints >= 50);
-        await sleep(1500); 
-    }
-}
-
-// --- الأتمتة ---
-client.on('ready', async () => {
-    console.log(`🚀 البوت متصل! يراقب القنوات.`);
-    await client.group.joinById(CHANNEL_TASKS);
-    await client.group.joinById(CHANNEL_ALLIANCE);
-    
-    // 1. طلب الحالة فور التشغيل
-    await requestBoxStatus(); 
-
-    // 2. تكرار طلب !مد صندوق كل 30 دقيقة (1,800,000 مللي ثانية)
-    setInterval(async () => {
-        console.log("⏰ حان وقت التحديث الدوري للصناديق...");
-        await requestBoxStatus();
-    }, 1800000); 
-
-    // 3. حلقة المهام
-    while (true) {
-        try {
-            await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد مهام');
-            await sleep(2000);
-            await client.messaging.sendGroupMessage(CHANNEL_ALLIANCE, '!مد تحالف ايداع كل');
-            await sleep(currentInterval);
-        } catch (err) { 
-            console.error("❌ خطأ:", err.message); 
-            await sleep(5000); 
-        }
-    }
-});
-
-
-// --- استقبال الرسائل ---
-client.on('groupMessage', async (message) => {
-    // 1. نظام Debug: فحص الرسائل القادمة
-    if (message.targetGroupId === CHANNEL_TASKS) {
-        if (isWaitingForBoxStatus) {
-            console.log(`🔍 [DEBUG] وصلت رسالة من ${message.sourceSubscriberId}: \n${message.body}`);
-        }
-    }
-
-    // 2. معالجة حالة الصناديق
-    if (isWaitingForBoxStatus && message.sourceSubscriberId === TARGET_USER_ID) {
-        const body = message.body;
-        
-        // استخراج البيانات
-        const bronzeMatch = body.match(/برونزي:\s*(\d+)/);
-        const silverMatch = body.match(/فضي:\s*(\d+)/);
-        const goldMatch = body.match(/ذهبي:\s*(\d+)/);
-        const pointsMatch = body.match(/نقاط الضمان:\s*(\d+)\/50/);
-        const statusMatch = body.match(/حالة الضمان:\s*([^\n\r]+)/); // تلتقط النص حتى نهاية السطر
-        const timeMatch = body.match(/الجهاز الزمني[:\s]+(.*)/);
-
-        if (pointsMatch && statusMatch && bronzeMatch && silverMatch && goldMatch) {
-            const points = parseInt(pointsMatch[1]);
-            const isReady = statusMatch[1].includes('جاهز');
-            const timeStatus = timeMatch ? timeMatch[1].trim() : "غير نشط";
-
-            console.log(`✅ تم تحليل الرسالة: النقاط=${points}, الحالة=${isReady ? 'جاهز' : 'غير جاهز'}, الوقت=${timeStatus}`);
-
-            if (timeStatus.includes('غير نشط')) {
-                if (isReady) {
-                    await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق ضمان وقت');
-                    console.log("🛠️ حالة الضمان جاهز والجهاز الزمني غير نشط، تم تفعيل الساعة.");
-                } else {
-                    await manageGuaranteePoints(points, parseInt(goldMatch[1]), parseInt(silverMatch[1]), parseInt(bronzeMatch[1]), isReady);
-                    currentInterval = 306000;
-                }
-            } else {
-                currentInterval = 64000;
-                const minMatch = timeStatus.match(/(\d+)د/);
-                const secMatch = timeStatus.match(/(\d+)ث/);
-                const totalSeconds = (minMatch ? parseInt(minMatch[1]) * 60 : 0) + (secMatch ? parseInt(secMatch[1]) : 0);
-                if (resetTimer) clearTimeout(resetTimer);
-                resetTimer = setTimeout(() => { currentInterval = 306000; }, totalSeconds * 1000);
-            }
-            isWaitingForBoxStatus = false;
-        }
-    }
-
-    // 3. معالجة الكابتشا
-    const isTargetChannel = (message.targetGroupId === CHANNEL_TASKS || message.targetGroupId === CHANNEL_ALLIANCE);
-    if (!isTargetChannel || message.sourceSubscriberId != TARGET_USER_ID || message.type !== 'text/image_link') return;
-
-    try {
-        const response = await fetch(message.body);
-        const buffer = Buffer.from(await response.arrayBuffer());
-        if (!(await isCaptchaByColor(buffer))) return;
-
-        const name = await extractPlayerName(buffer);
-        if (name.toLowerCase().includes(TARGET_PLAYER_NAME.toLowerCase())) {
-            const code = await solveCaptcha(buffer);
-            if (code) await client.messaging.sendGroupMessage(message.targetGroupId, `#${code}`);
-        }
-    } catch (err) { console.error("⚠️ خطأ في الكابتشا:", err.message); }
-});
-
-// --- دوال الصور ---
+// --- الدوال الأساسية للكابتشا ---
 async function isCaptchaByColor(buffer) {
     const { data, info } = await sharp(buffer).raw().ensureAlpha().toBuffer({ resolveWithObject: true });
     let redPixels = 0;
@@ -181,8 +33,8 @@ async function extractPlayerName(buffer) {
         const { data: { text } } = await worker.recognize(processedBuffer);
         await worker.terminate();
         const match = text.match(/اللاعب[:\s]+([^\n\r]+)/u);
-        return match ? match[1].trim() : "لم يتم العثور";
-    } catch (e) { return "خطأ"; }
+        return match ? match[1].trim() : "";
+    } catch (e) { return ""; }
 }
 
 async function solveCaptcha(buffer) {
@@ -208,5 +60,132 @@ async function solveCaptcha(buffer) {
     await worker.terminate();
     return text.replace(/[^a-zA-Z0-9\u0621-\u064A]/g, '').trim();
 }
+
+// --- دالة منطق فتح الصناديق ---
+async function processBoxOpening(g, s, b, currentPoints, isNotReady) {
+    const sendWithDelay = async (cmd) => {
+        await client.messaging.sendGroupMessage(CHANNEL_ID, cmd);
+        await new Promise(resolve => setTimeout(resolve, 10000)); // انتظار 10 ثواني
+    };
+
+    if (isNotReady) {
+        console.log("⚠️ الحالة 'غير جاهز' موجودة: فتح جميع الصناديق...");
+        while (g > 0) { await sendWithDelay('!مد صندوق فتح ذهبي'); g--; }
+        while (s > 0) { await sendWithDelay('!مد صندوق فتح فضي'); s--; }
+        while (b > 0) { await sendWithDelay('!مد صندوق فتح برونزي'); b--; }
+    } else if (currentPoints < 40) {
+        console.log(`✅ الحالة 'جاهز' والنقاط ${currentPoints} أقل من 40: الحساب للوصول لـ 42...`);
+        let needed = 42 - currentPoints;
+        while (needed > 0) {
+            if (needed >= 4 && g > 0) {
+                await sendWithDelay('!مد صندوق فتح ذهبي');
+                g--; needed -= 4;
+            } else if (needed >= 2 && s > 0) {
+                await sendWithDelay('!مد صندوق فتح فضي');
+                s--; needed -= 2;
+            } else if (needed >= 1 && b > 0) {
+                await sendWithDelay('!مد صندوق فتح برونزي');
+                b--; needed -= 1;
+            } else { break; }
+        }
+    }
+}
+
+// --- المعالجة الرئيسية للكابتشا ---
+client.on('groupMessage', async (message) => {
+    if (message.sourceSubscriberId != TARGET_USER_ID || message.targetGroupId != CHANNEL_ID || message.type !== 'text/image_link') return;
+    try {
+        const response = await fetch(message.body);
+        const buffer = Buffer.from(await response.arrayBuffer());
+        if (!(await isCaptchaByColor(buffer))) return;
+        const playerName = await extractPlayerName(buffer);
+        if (ALLOWED_PLAYERS.some(n => playerName.includes(n))) {
+            const code = await solveCaptcha(buffer);
+            if (code) await client.messaging.sendGroupMessage(CHANNEL_ID, `#${code}`);
+        }
+    } catch (err) { console.error("⚠️ خطأ كابتشا:", err.message); }
+});
+
+// --- وظيفة فحص الصناديق ---
+const sendBoxCommand = () => {
+    return new Promise((resolve) => {
+        client.messaging.sendGroupMessage(CHANNEL_ID, '!مد صندوق');
+        
+        const responseHandler = async (message) => {
+            if (message.targetGroupId == CHANNEL_ID && message.body.startsWith('/me 📦 حالة الصناديق')) {
+                // 1. استخراج المتغيرات
+                const body = message.body;
+                const matchA = body.match(/حالة الضمان:\s*(.*)/);
+                const matchB = body.match(/الجهاز الزمني:\s*(.*)/);
+                const boxesMatch = body.match(/برونزي:\s*(\d+)\s*\|\s*فضي:\s*(\d+)\s*\|\s*ذهبي:\s*(\d+)/);
+                const pointsMatch = body.match(/نقاط الضمان:\s*(\d+)\/50/);
+
+                const a = matchA ? matchA[1].trim() : "";
+                const b = matchB ? matchB[1].trim() : "";
+                const n = boxesMatch ? parseInt(boxesMatch[1]) : 0; // برونزي
+                const s = boxesMatch ? parseInt(boxesMatch[2]) : 0; // فضي
+                const g = boxesMatch ? parseInt(boxesMatch[3]) : 0; // ذهبي
+                const currentPoints = pointsMatch ? parseInt(pointsMatch[1]) : 0;
+                
+                const isNotReady = a.includes("غير جاهز");
+
+                // 2. تنفيذ منطق الفتح قبل أي شيء
+                await processBoxOpening(g, s, n, currentPoints, isNotReady);
+
+                // 3. حساب التايمر
+                let tempTimer = 0;
+                if (b.includes("غير نشط")) {
+                    if (!a.includes("غير جاهز")) {
+                        client.messaging.sendGroupMessage(CHANNEL_ID, '!مد صندوق ضمان وقت');
+                        tempTimer = 3 * 60 * 60;
+                    }
+                } else {
+                    const h = b.match(/(\d+)س/);
+                    const m = b.match(/(\d+)د/);
+                    const ts = b.match(/(\d+)ث/);
+                    if (h) tempTimer += parseInt(h[1]) * 3600;
+                    if (m) tempTimer += parseInt(m[1]) * 60;
+                    if (ts) tempTimer += parseInt(ts[1]);
+                }
+                
+                globalTimer = tempTimer;
+                console.log(`⏱ تم التحديث. التايمر:${globalTimer} | النقاط:${currentPoints}`);
+                client.removeListener('groupMessage', responseHandler);
+                resolve();
+            }
+        };
+
+        client.on('groupMessage', responseHandler);
+        setTimeout(() => { client.removeListener('groupMessage', responseHandler); resolve(); }, 10000);
+    });
+};
+
+const startTaskLoop = async () => {
+    while (true) {
+        try {
+            await client.messaging.sendGroupMessage(CHANNEL_ID, '!مد مهام');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            await client.messaging.sendGroupMessage(CHANNEL_ID, '!مد تحالف ايداع كل');
+
+            if (globalTimer > 0) {
+                globalTimer = Math.max(0, globalTimer - 64);
+                console.log(`⏳ التايمر يقل: ${globalTimer} ثانية متبقية.`);
+                await new Promise(resolve => setTimeout(resolve, 64000));
+                if (globalTimer === 0) await sendBoxCommand();
+            } else {
+                console.log("⏳ التايمر 0، تحديث...");
+                await new Promise(resolve => setTimeout(resolve, 306000));
+                await sendBoxCommand();
+            }
+        } catch (err) { console.error("⚠️ خطأ حلقة:", err.message); await new Promise(resolve => setTimeout(resolve, 5000)); }
+    }
+};
+
+client.on('ready', async () => {
+    console.log("🚀 البوت يعمل الآن");
+    await sendBoxCommand();
+    setInterval(sendBoxCommand, 30 * 60 * 1000);
+    startTaskLoop();
+});
 
 client.login(process.env.U_MAIL, process.env.U_PASS);
