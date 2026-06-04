@@ -15,6 +15,11 @@ const ALLOWED_PLAYERS = ['cat'];
 // متغير عالمي للتايمر
 let globalTimer = 0;
 
+// دالة مساعدة للفخاخ
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // --- الدوال الأساسية للكابتشا ---
 async function isCaptchaByColor(buffer) {
     const { data, info } = await sharp(buffer).raw().ensureAlpha().toBuffer({ resolveWithObject: true });
@@ -65,7 +70,7 @@ async function solveCaptcha(buffer) {
 async function processBoxOpening(g, s, b, currentPoints, isNotReady) {
     const sendWithDelay = async (cmd) => {
         await client.messaging.sendGroupMessage(CHANNEL_ID, cmd);
-        await new Promise(resolve => setTimeout(resolve, 10000)); // انتظار 10 ثواني
+        await new Promise(resolve => setTimeout(resolve, 10000));
     };
 
     if (isNotReady) {
@@ -106,6 +111,65 @@ client.on('groupMessage', async (message) => {
     } catch (err) { console.error("⚠️ خطأ كابتشا:", err.message); }
 });
 
+// --- إضافة منطق الفخاخ ---
+client.on('groupMessage', async (message) => {
+    try {
+        const content = message.body;
+        const isTargetGroup = message.targetGroupId === CHANNEL_ID;
+        if (!isTargetGroup) return;
+
+        if (content.includes("تحقق") && ALLOWED_PLAYERS.some(p => content.includes(p))) {
+            
+            if (content.includes("العلامتين")) {
+                const symMatch = content.match(/العلامتين\s*([^\s\w\u0600-\u06FF])\s*و\s*([^\s\w\u0600-\u06FF])/u);
+                if (symMatch) {
+                    const pattern = new RegExp(`${escapeRegExp(symMatch[1])}(.*?)${escapeRegExp(symMatch[2])}`, 'gu');
+                    const matches = [...content.matchAll(pattern)];
+                    if (matches.length > 0) {
+                        const target = matches.length > 1 ? matches[1] : matches[0];
+                        await client.messaging.sendGroupMessage(message.targetGroupId, `#${target[1].trim()}`);
+                    }
+                }
+            }
+            else if (content.includes("داخل القوسين")) {
+                const match = content.match(/\((.*?)\)/);
+                if (match) await client.messaging.sendGroupMessage(message.targetGroupId, `#${match[1].trim()}`);
+            }
+            else if (content.includes("الأقواس المعقوفة")) {
+                const match = content.match(/\{(.*?)\}/);
+                if (match) await client.messaging.sendGroupMessage(message.targetGroupId, `#${match[1].trim()}`);
+            }
+            else if (content.includes("يمين") || content.includes("يسار")) {
+                const symMatch = content.match(/للعلامة\s*([^\s])/u);
+                const dirMatch = content.match(/(اليمين|يمين|اليسار|يسار)/u);
+                if (symMatch && dirMatch) {
+                    const regex = new RegExp(`([^\\s]+)\\s*${escapeRegExp(symMatch[1])}\\s*([^\\s]+)`, 'gu');
+                    const matches = [...content.matchAll(regex)];
+                    if (matches.length > 0) {
+                        const target = matches.length > 1 ? matches[1] : matches[0];
+                        const answer = dirMatch[0].includes("يمين") ? target[2] : target[1];
+                        await client.messaging.sendGroupMessage(message.targetGroupId, `#${answer}`);
+                    }
+                }
+            }
+            else if (content.includes("الرمز رقم")) {
+                const indexMatch = content.match(/رقم\s*(\d+)/u);
+                const listMatch = content.match(/⁦(.*?)\s*⁩/u);
+                
+                if (indexMatch && listMatch) {
+                    const items = listMatch[1].split('|').map(s => s.trim());
+                    const index = parseInt(indexMatch[1]) - 1;
+                    
+                    if (items[index]) {
+                        console.log(`✅ فخ القوائم: العنصر المطلوب هو [${items[index]}]`);
+                        await client.messaging.sendGroupMessage(message.targetGroupId, `#${items[index]}`);
+                    }
+                }
+            }
+        }
+    } catch (err) { console.error("خطأ:", err); }
+});
+
 // --- وظيفة فحص الصناديق ---
 const sendBoxCommand = () => {
     return new Promise((resolve) => {
@@ -113,7 +177,6 @@ const sendBoxCommand = () => {
         
         const responseHandler = async (message) => {
             if (message.targetGroupId == CHANNEL_ID && message.body.startsWith('/me 📦 حالة الصناديق')) {
-                // 1. استخراج المتغيرات
                 const body = message.body;
                 const matchA = body.match(/حالة الضمان:\s*(.*)/);
                 const matchB = body.match(/الجهاز الزمني:\s*(.*)/);
@@ -122,17 +185,15 @@ const sendBoxCommand = () => {
 
                 const a = matchA ? matchA[1].trim() : "";
                 const b = matchB ? matchB[1].trim() : "";
-                const n = boxesMatch ? parseInt(boxesMatch[1]) : 0; // برونزي
-                const s = boxesMatch ? parseInt(boxesMatch[2]) : 0; // فضي
-                const g = boxesMatch ? parseInt(boxesMatch[3]) : 0; // ذهبي
+                const n = boxesMatch ? parseInt(boxesMatch[1]) : 0;
+                const s = boxesMatch ? parseInt(boxesMatch[2]) : 0;
+                const g = boxesMatch ? parseInt(boxesMatch[3]) : 0;
                 const currentPoints = pointsMatch ? parseInt(pointsMatch[1]) : 0;
                 
                 const isNotReady = a.includes("غير جاهز");
 
-                // 2. تنفيذ منطق الفتح قبل أي شيء
                 await processBoxOpening(g, s, n, currentPoints, isNotReady);
 
-                // 3. حساب التايمر
                 let tempTimer = 0;
                 if (b.includes("غير نشط")) {
                     if (!a.includes("غير جاهز")) {
